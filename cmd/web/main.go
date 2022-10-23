@@ -1,9 +1,10 @@
 package main
 
 import (
-	"database/sql"
+	"context"
 	"flag"
-	_ "github.com/lib/pq"
+	"github.com/jackc/pgx/v4/pgxpool"
+	"html/template"
 	"log"
 	"net/http"
 	"os"
@@ -11,15 +12,16 @@ import (
 )
 
 type application struct {
-	errorLog *log.Logger
-	infoLog  *log.Logger
-	snippets *models.SnippetModel
+	errorLog      *log.Logger
+	infoLog       *log.Logger
+	snippets      *models.SnippetModel
+	templateCache map[string]*template.Template
 }
 
 func main() {
 	addr := flag.String("addr", ":4000", "HTTP network address")
 
-	dsn := flag.String("dsn", "user=postgres password=123456 dbname=snippetbox sslmode=disable", "PostgresSql data source name")
+	dsn := flag.String("dsn", "postgres://postgres:N2704Anice@localhost:5432/snippetbox", "PostgresSql data source name")
 
 	flag.Parse()
 
@@ -33,10 +35,16 @@ func main() {
 
 	defer db.Close()
 
+	templateCache, err := newTemplateCache()
+	if err != nil {
+		errorLog.Fatal(err)
+	}
+
 	app := &application{
-		errorLog: errorLog,
-		infoLog:  infoLog,
-		snippets: &models.SnippetModel{DB: db},
+		errorLog:      errorLog,
+		infoLog:       infoLog,
+		snippets:      &models.SnippetModel{DB: db},
+		templateCache: templateCache,
 	}
 
 	srv := &http.Server{
@@ -50,12 +58,12 @@ func main() {
 	errorLog.Fatal(err)
 }
 
-func openDB(dsn string) (*sql.DB, error) {
-	db, err := sql.Open("postgres", dsn)
+func openDB(dsn string) (*pgxpool.Pool, error) {
+	db, err := pgxpool.Connect(context.Background(), dsn)
 	if err != nil {
 		return nil, err
 	}
-	if err = db.Ping(); err != nil {
+	if err = db.Ping(context.Background()); err != nil {
 		return nil, err
 	}
 	return db, nil
